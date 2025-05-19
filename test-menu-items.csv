@@ -1,0 +1,5 @@
+name,description,price,category,tags,imageUrl,costPrice,preparationTime,inventoryAvailable,inventoryUnit,startingInventoryQuantity,decrementPerOrder
+Pizza Margherita,Classic Italian pizza with tomato sauce, mozzarella, and fresh basil,199,Pizza,"italian,veg",https://example.com/pizza-margherita.jpg,50,15,10,units,100,1
+Chicken Tikka Masala,Spicy grilled chicken in creamy tomato sauce,299,Main Course,"indian,non-veg",https://example.com/chicken-tikka.jpg,80,20,5,kg,5,0.5
+Veg Thali,Assorted vegetarian dishes with rice and papad,149,Thali,"indian,veg",https://example.com/veg-thali.jpg,40,25,20,plates,50,1
+Pepsi,Chilled soft drink,35,Drinks,"cold,beverages",https://example.com/pepsi.jpg,15,5,100,liters,50,0.5
