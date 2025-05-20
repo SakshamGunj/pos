@@ -74,6 +74,7 @@ export const bulkAddMenuItems = async (menuItems: Partial<MenuItem>[]) => {
       startingInventoryQuantity: item.startingInventoryQuantity || 0,
       decrementPerOrder: item.decrementPerOrder || 1,
       costPrice: item.costPrice || 0,
+      gstApplicable: item.gstApplicable !== undefined ? !!item.gstApplicable : true, // Default to true if not specified
       preparationTime: 5, // Default preparation time
       createdAt: new Date(),
       updatedAt: new Date()
@@ -90,101 +91,151 @@ export const bulkAddMenuItems = async (menuItems: Partial<MenuItem>[]) => {
 };
 
 export const addMenuItem = async (menuItem: Omit<MenuItem, 'id' | 'createdAt' | 'updatedAt'>) => {
-  // Handle inventory-related fields
-  const hasInventory = menuItem.hasInventoryTracking;
-  const inventoryAvailable = hasInventory ? (menuItem.inventoryAvailable ?? true) : undefined;
-  const inventoryUnit = hasInventory ? (menuItem.inventoryUnit ?? 'piece') : undefined;
-  const startingInventoryQuantity = hasInventory ? (menuItem.startingInventoryQuantity ?? 0) : undefined;
-  const decrementPerOrder = hasInventory ? (menuItem.decrementPerOrder ?? 1) : undefined;
-  
-  // Convert Date objects to Firestore timestamps
-  const firestoreMenuItem = {
-    ...menuItem,
-    inventoryAvailable,
-    inventoryUnit,
-    startingInventoryQuantity,
-    decrementPerOrder,
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
-  
-  const docRef = await addDoc(collection(db, MENU_ITEMS), firestoreMenuItem);
-  
-  // Create initial inventory record if tracking is enabled
-  if (hasInventory && startingInventoryQuantity !== undefined && startingInventoryQuantity > 0) {
-    try {
-      // Import is done here to avoid circular dependencies
-      const { recordInventoryTransaction } = require('./inventoryService');
-      
-      // Record the initial inventory as a transaction
-      await recordInventoryTransaction(
-        `menu_item_${docRef.id}`,
-        startingInventoryQuantity, // Positive value for initial stock
-        `Initial inventory for ${menuItem.name}`,
-        undefined // No order ID for initial inventory
-      );
-    } catch (error) {
-      console.error('Error recording initial inventory:', error);
-      // Continue even if recording initial inventory fails
-    }
+  // Create a mutable copy of the menuItem data to avoid modifying the input object directly
+  // and to allow for deletion of optional properties if necessary.
+  const dataToSave: any = { ...menuItem };
+
+  dataToSave.createdAt = new Date();
+  dataToSave.updatedAt = new Date();
+
+  if (dataToSave.hasInventoryTracking) {
+    // If inventory tracking is enabled:
+    // - Ensure 'inventoryAvailable' is a boolean. Default to true if not explicitly provided.
+    dataToSave.inventoryAvailable = dataToSave.inventoryAvailable ?? true;
+    // - Provide defaults for other inventory-related fields if they are not set.
+    dataToSave.inventoryUnit = dataToSave.inventoryUnit ?? 'piece';
+    dataToSave.startingInventoryQuantity = dataToSave.startingInventoryQuantity ?? 0;
+    dataToSave.decrementPerOrder = dataToSave.decrementPerOrder ?? 1;
+    // - 'inventoryUsage' should be an array. Default to an empty array if not provided.
+    dataToSave.inventoryUsage = dataToSave.inventoryUsage ?? [];
+  } else {
+    // If inventory tracking is NOT enabled:
+    // - The item is considered available by default.
+    dataToSave.inventoryAvailable = true;
+    // - Remove other inventory-specific fields as they are not relevant.
+    //   Assigning 'undefined' would also work if Firestore is configured to ignore undefined fields,
+    //   but explicit deletion is cleaner for optional fields.
+    delete dataToSave.inventoryUnit;
+    delete dataToSave.startingInventoryQuantity;
+    delete dataToSave.decrementPerOrder;
+    delete dataToSave.inventoryUsage;
   }
+
+  // Fields like description, costPrice, imageUrl, etc., are expected to be handled
+  // by the caller (e.g., MenuManagementPage) to be either their respective values or null if empty.
+  // This ensures that 'undefined' is not passed for these optional string/number fields.
+
+  const docRef = await addDoc(collection(db, MENU_ITEMS), dataToSave);
   
+  // Fetch the newly created document to ensure we return the complete data as stored in Firestore,
+  // including any server-generated timestamps or transformations if applicable (though we set them client-side here).
+  const newDocSnapshot = await getDoc(docRef);
+  const savedData = newDocSnapshot.data();
+
   return {
     id: docRef.id,
-    ...firestoreMenuItem
+    ...(savedData as Omit<MenuItem, 'id'>), // Cast to ensure type conformity, id is added separately
   } as MenuItem;
 };
 
-export const updateMenuItem = async (id: string, menuItem: Partial<MenuItem>) => {
+export const updateMenuItem = async (id: string, menuItemInput: Partial<MenuItem>) => {
   const menuItemRef = doc(db, MENU_ITEMS, id);
-  
-  // Get the current menu item to compare inventory changes
-  const menuItemSnap = await getDoc(menuItemRef);
-  const currentMenuItem = menuItemSnap.exists() ? menuItemSnap.data() as MenuItem : null;
-  
-  // Handle inventory-related fields
-  const hasInventory = menuItem.hasInventoryTracking !== undefined ? menuItem.hasInventoryTracking : currentMenuItem?.hasInventoryTracking;
-  
-  // Prepare the update object
-  const updatedMenuItem = {
-    ...menuItem,
-    updatedAt: new Date()
-  };
-  
-  // Update the document
-  await updateDoc(menuItemRef, updatedMenuItem);
-  
-  // Handle inventory quantity changes if needed
-  if (hasInventory && 
-      menuItem.startingInventoryQuantity !== undefined && 
-      currentMenuItem?.startingInventoryQuantity !== undefined && 
-      menuItem.startingInventoryQuantity !== currentMenuItem.startingInventoryQuantity) {
-    try {
-      // Import is done here to avoid circular dependencies
-      const { recordInventoryTransaction } = require('./inventoryService');
-      
-      // Calculate the change in inventory
-      const quantityChange = menuItem.startingInventoryQuantity - currentMenuItem.startingInventoryQuantity;
-      
-      if (quantityChange !== 0) {
-        // Record the inventory adjustment as a transaction
-        await recordInventoryTransaction(
-          `menu_item_${id}`,
-          quantityChange,
-          `Manual inventory adjustment for ${currentMenuItem.name}`,
-          undefined // No order ID for manual adjustment
-        );
+
+  // Create a mutable copy for the data to be updated.
+  const dataForUpdate: Partial<MenuItem> = { ...menuItemInput };
+  dataForUpdate.updatedAt = new Date();
+
+  // Handle inventoryAvailable and other inventory fields based on hasInventoryTracking status
+  if (dataForUpdate.hasInventoryTracking === true) {
+    // If tracking is explicitly being enabled or is already enabled and inventory fields are being updated.
+    dataForUpdate.inventoryAvailable = dataForUpdate.inventoryAvailable ?? true; // Default to true if undefined
+    
+    // Provide defaults for other inventory fields if they are explicitly part of the payload and undefined
+    if ('inventoryUnit' in dataForUpdate && dataForUpdate.inventoryUnit === undefined) {
+        dataForUpdate.inventoryUnit = 'piece';
+    }
+    if ('startingInventoryQuantity' in dataForUpdate && dataForUpdate.startingInventoryQuantity === undefined) {
+        dataForUpdate.startingInventoryQuantity = 0;
+    }
+    if ('decrementPerOrder' in dataForUpdate && dataForUpdate.decrementPerOrder === undefined) {
+        dataForUpdate.decrementPerOrder = 1;
+    }
+    if ('inventoryUsage' in dataForUpdate && dataForUpdate.inventoryUsage === undefined) {
+        dataForUpdate.inventoryUsage = [];
+    }
+  } else if (dataForUpdate.hasInventoryTracking === false) {
+    // If tracking is explicitly being disabled.
+    dataForUpdate.inventoryAvailable = true; // Item is considered available if not tracked by inventory.
+    // Remove other inventory-specific fields from the update data by deleting them from the object.
+    // This prevents them from being sent as 'undefined' to Firestore.
+    const D = dataForUpdate as any; // Use 'any' to allow deletion of properties from Partial<MenuItem>
+    delete D.inventoryUnit;
+    delete D.startingInventoryQuantity;
+    delete D.decrementPerOrder;
+    delete D.inventoryUsage;
+  } else {
+    // hasInventoryTracking is NOT in menuItemInput (i.e., not being changed in this update).
+    // The item's current hasInventoryTracking status in the DB dictates behavior for related fields.
+    // If inventoryAvailable IS in menuItemInput and is undefined, this could be problematic if the item IS tracked.
+    if ('inventoryAvailable' in dataForUpdate && dataForUpdate.inventoryAvailable === undefined) {
+        // This implies the item is currently tracked (or this field wouldn't be relevant otherwise),
+        // and an attempt is made to set inventoryAvailable to undefined. Default to true.
+        dataForUpdate.inventoryAvailable = true;
+    }
+    // Similar logic could be applied to other inventory fields if they are updated independently
+    // while hasInventoryTracking itself is not changing and is true.
+  }
+
+  // Final safeguard: Remove any top-level properties from dataForUpdate that are still undefined.
+  // This ensures that no 'undefined' values are sent to Firestore in the update payload.
+  Object.keys(dataForUpdate).forEach(keyStr => {
+    const key = keyStr as keyof Partial<MenuItem>;
+    if (dataForUpdate[key] === undefined) {
+      delete dataForUpdate[key];
+    }
+  });
+
+  // Fetch the original menu item state *before* the update for inventory transaction logic.
+  const menuItemSnapBeforeUpdate = await getDoc(menuItemRef);
+  const originalMenuItem = menuItemSnapBeforeUpdate.exists() ? menuItemSnapBeforeUpdate.data() as MenuItem : null;
+
+  await updateDoc(menuItemRef, dataForUpdate);
+
+  // Inventory transaction logic (handles changes in startingInventoryQuantity if item is tracked).
+  if (originalMenuItem) {
+    // Determine the effective tracking status after this update.
+    const effectiveHasInventoryTracking = dataForUpdate.hasInventoryTracking !== undefined 
+      ? dataForUpdate.hasInventoryTracking 
+      : originalMenuItem.hasInventoryTracking;
+
+    if (effectiveHasInventoryTracking && 
+        'startingInventoryQuantity' in dataForUpdate && // Ensure this field was part of the intended update
+        dataForUpdate.startingInventoryQuantity !== undefined && // And it's not undefined post-cleanup
+        dataForUpdate.startingInventoryQuantity !== (originalMenuItem.startingInventoryQuantity ?? 0)
+    ) {
+      try {
+        const { recordInventoryTransaction } = require('./inventoryService'); // Local require to avoid circular deps
+        const quantityChange = (dataForUpdate.startingInventoryQuantity ?? 0) - (originalMenuItem.startingInventoryQuantity ?? 0);
+        if (quantityChange !== 0) {
+          await recordInventoryTransaction(
+            `menu_item_${id}`,
+            quantityChange,
+            `Manual inventory adjustment for ${originalMenuItem.name || dataForUpdate.name || 'item'}`,
+            undefined // No order ID for manual adjustment
+          );
+        }
+      } catch (error) {
+        console.error('Error recording inventory adjustment:', error);
       }
-    } catch (error) {
-      console.error('Error recording inventory adjustment:', error);
-      // Continue even if recording inventory adjustment fails
     }
   }
   
+  // Return the data that was intended for the update, plus the ID.
+  // For a more complete return of the updated state, another getDoc would be needed.
   return {
     id,
-    ...menuItem
-  };
+    ...dataForUpdate
+  } as Partial<MenuItem> & { id: string }; // Reflects that dataForUpdate might not be a full MenuItem
 };
 
 export const deleteMenuItem = async (id: string) => {

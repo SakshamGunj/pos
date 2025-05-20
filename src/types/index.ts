@@ -107,6 +107,7 @@ export interface MenuItem {
   startingInventoryQuantity?: number;
   decrementPerOrder?: number;
   preparationTime?: number;
+  gstApplicable: boolean; // Whether GST is applicable to this item
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date | null;

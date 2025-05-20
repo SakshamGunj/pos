@@ -19,6 +19,7 @@ const AddMenuItemModal: React.FC<AddMenuItemModalProps> = ({
   onSave,
   categories,
   availableTags,
+  existingItem,
 }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -33,6 +34,8 @@ const AddMenuItemModal: React.FC<AddMenuItemModalProps> = ({
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
   const [allergenInfo, setAllergenInfo] = useState('');
   const [ingredientNotes, setIngredientNotes] = useState('');
+  // GST applicability
+  const [gstApplicable, setGstApplicable] = useState(true);
   // Inventory management state
   const [hasInventoryTracking, setHasInventoryTracking] = useState(false);
   const [inventoryUsage, setInventoryUsage] = useState<InventoryUsage[]>([]);
@@ -42,30 +45,55 @@ const AddMenuItemModal: React.FC<AddMenuItemModalProps> = ({
   const [decrementCounter, setDecrementCounter] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset form when modal is opened
+  // Reset form or populate with existingItem when modal is opened
   React.useEffect(() => {
     if (isOpen) {
-      setName('');
-      setDescription('');
-      setPrice('');
-      setCostPrice('');
-      setCategory(categories.length > 0 ? categories[0].id : '');
-      setSelectedTags([]);
-      setImageUrl('');
-      setImageFile(null);
-      setUploadProgress(0);
-      setStatus('active');
-      setAllergenInfo('');
-      setIngredientNotes('');
-      // Reset inventory management state
-      setHasInventoryTracking(false);
-      setInventoryUsage([]);
-      setInventoryAvailable(true);
-      setInventoryUnit('piece');
-      setStartingInventory(0);
-      setDecrementCounter(1);
+      if (existingItem) {
+        // Editing existing item - populate form with data
+        setName(existingItem.name);
+        setDescription(existingItem.description || '');
+        setPrice(existingItem.price.toString());
+        setCostPrice(existingItem.costPrice ? existingItem.costPrice.toString() : '');
+        setCategory(existingItem.category);
+        setSelectedTags(existingItem.tags);
+        setImageUrl(existingItem.imageUrl || '');
+        // Only set status to 'active' or 'inactive', ignore 'deleted'
+        setStatus(existingItem.status === 'active' || existingItem.status === 'inactive' ? existingItem.status : 'inactive');
+        setAllergenInfo(existingItem.allergenInfo || '');
+        setIngredientNotes(existingItem.ingredientNotes || '');
+        setGstApplicable(existingItem.gstApplicable); // Set GST applicability from existing item
+        // Set inventory management state
+        setHasInventoryTracking(existingItem.hasInventoryTracking);
+        setInventoryUsage(existingItem.inventoryUsage || []);
+        setInventoryAvailable(existingItem.inventoryAvailable !== undefined ? existingItem.inventoryAvailable : true);
+        setInventoryUnit(existingItem.inventoryUnit || 'piece');
+        setStartingInventory(existingItem.startingInventoryQuantity || 0);
+        setDecrementCounter(existingItem.decrementPerOrder || 1);
+      } else {
+        // Adding new item - reset form
+        setName('');
+        setDescription('');
+        setPrice('');
+        setCostPrice('');
+        setCategory(categories.length > 0 ? categories[0].id : '');
+        setSelectedTags([]);
+        setImageUrl('');
+        setImageFile(null);
+        setUploadProgress(0);
+        setStatus('active');
+        setAllergenInfo('');
+        setIngredientNotes('');
+        setGstApplicable(true); // Default to GST applicable for new items
+        // Reset inventory management state
+        setHasInventoryTracking(false);
+        setInventoryUsage([]);
+        setInventoryAvailable(true);
+        setInventoryUnit('piece');
+        setStartingInventory(0);
+        setDecrementCounter(1);
+      }
     }
-  }, [isOpen, categories]);
+  }, [isOpen, categories, existingItem]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -112,6 +140,7 @@ const AddMenuItemModal: React.FC<AddMenuItemModalProps> = ({
       category,
       imageUrl: finalImageUrl || null,
       tags: selectedTags,
+      gstApplicable,
       status: status === 'active' ? 'active' : 'inactive',
       variantGroups: null,
       addOnGroups: null,
@@ -393,6 +422,28 @@ const AddMenuItemModal: React.FC<AddMenuItemModalProps> = ({
                 onChange={(e) => setIngredientNotes(e.target.value)}
                 placeholder="Special preparation notes, ingredients list, etc."
               />
+            </div>
+
+            {/* GST Applicability */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-gray-700">GST Applicable</label>
+                <div className="relative inline-block w-10 mr-2 align-middle select-none">
+                  <input
+                    type="checkbox"
+                    name="gstApplicable"
+                    id="gstApplicable"
+                    checked={gstApplicable}
+                    onChange={(e) => setGstApplicable(e.target.checked)}
+                    className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"
+                  />
+                  <label
+                    htmlFor="gstApplicable"
+                    className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer ${gstApplicable ? 'bg-green-400' : 'bg-gray-300'}`}
+                  ></label>
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">{gstApplicable ? "18% GST will apply to this item" : "No GST will be applied to this item"}</p>
             </div>
 
             {/* Inventory Tracking Section */}

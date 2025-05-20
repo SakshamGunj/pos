@@ -26,6 +26,7 @@ interface ParsedMenuItem {
   inventoryUnit?: string;
   startingInventoryQuantity?: number;
   decrementPerOrder?: number;
+  gstApplicable?: boolean; // Whether GST is applicable to this item
   [key: string]: any; // For any additional fields
 }
 
@@ -206,6 +207,28 @@ const BulkMenuUploadModal: React.FC<BulkMenuUploadModalProps> = ({ isOpen, onClo
         }
       }
 
+      // GST applicability (optional)
+      if (row.gstApplicable !== undefined) {
+        // Convert to boolean - accept 'true', 'false', true, false, 1, 0, 'yes', 'no'
+        if (typeof row.gstApplicable === 'boolean') {
+          item.gstApplicable = row.gstApplicable;
+        } else if (typeof row.gstApplicable === 'string') {
+          const value = row.gstApplicable.toLowerCase();
+          if (['true', 'yes', '1'].includes(value)) {
+            item.gstApplicable = true;
+          } else if (['false', 'no', '0'].includes(value)) {
+            item.gstApplicable = false;
+          } else {
+            errors.push({ row: rowNumber, field: 'gstApplicable', message: 'GST applicability must be true/false, yes/no, or 1/0' });
+          }
+        } else if (typeof row.gstApplicable === 'number') {
+          item.gstApplicable = row.gstApplicable === 1;
+        }
+      } else {
+        // Default to true if not specified
+        item.gstApplicable = true;
+      }
+
       items.push(item);
     });
 
@@ -245,6 +268,9 @@ const BulkMenuUploadModal: React.FC<BulkMenuUploadModalProps> = ({ isOpen, onClo
           menuItem.inventoryUnit = item.inventoryUnit as InventoryUnit;
         }
         
+        // Add gstApplicable field
+        menuItem.gstApplicable = item.gstApplicable;
+
         return menuItem;
       });
 
@@ -278,7 +304,8 @@ const BulkMenuUploadModal: React.FC<BulkMenuUploadModalProps> = ({ isOpen, onClo
         inventoryAvailable: true,
         inventoryUnit: 'piece',
         startingInventoryQuantity: 50,
-        decrementPerOrder: 1
+        decrementPerOrder: 1,
+        gstApplicable: true, // Default to true for GST
       },
       {
         name: 'Masala Dosa',
@@ -291,7 +318,8 @@ const BulkMenuUploadModal: React.FC<BulkMenuUploadModalProps> = ({ isOpen, onClo
         inventoryAvailable: true,
         inventoryUnit: 'piece',
         startingInventoryQuantity: 100,
-        decrementPerOrder: 1
+        decrementPerOrder: 1,
+        gstApplicable: true, // Default to true for GST
       },
       {
         name: 'Mango Lassi',
@@ -304,7 +332,8 @@ const BulkMenuUploadModal: React.FC<BulkMenuUploadModalProps> = ({ isOpen, onClo
         inventoryAvailable: true,
         inventoryUnit: 'cup',
         startingInventoryQuantity: 30,
-        decrementPerOrder: 1
+        decrementPerOrder: 1,
+        gstApplicable: true, // Default to true for GST
       }
     ];
 
@@ -365,9 +394,10 @@ const BulkMenuUploadModal: React.FC<BulkMenuUploadModalProps> = ({ isOpen, onClo
                     <div className="space-y-4">
                       <div className="bg-gray-50 p-4 rounded-lg">
                         <h4 className="font-medium text-gray-700 mb-2">Instructions</h4>
+                        <p className="text-sm text-gray-600 mt-1">
+                  Upload a CSV or Excel file with menu item data. Required fields: name, price, category. Optional fields include gstApplicable (yes/no) to control GST application per item.
+                </p>
                         <ul className="text-sm text-gray-600 list-disc pl-5 space-y-1">
-                          <li>Upload a CSV or Excel file with menu items</li>
-                          <li>Required fields: name, price, category</li>
                           <li>Optional fields: description, tags, imageUrl, etc.</li>
                           <li>For multiple tags, separate with commas</li>
                         </ul>

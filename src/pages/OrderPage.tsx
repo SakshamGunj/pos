@@ -51,14 +51,26 @@ const generateBillHtml = (orderData: Order): string => {
     }
   `;
 
-  const itemsHtml = orderData.orderItems.map(item => `
+  // Group items by GST applicability
+  const gstApplicableItems = orderData.orderItems.filter(item => item.menuItem.gstApplicable !== false);
+  const nonGstItems = orderData.orderItems.filter(item => item.menuItem.gstApplicable === false);
+  
+  // Calculate subtotals for each group
+  const gstApplicableSubtotal = gstApplicableItems.reduce((total, item) => total + (item.priceAtAddition * item.quantity), 0);
+  const nonGstSubtotal = nonGstItems.reduce((total, item) => total + (item.priceAtAddition * item.quantity), 0);
+  
+  // Generate HTML for all items with GST status indicator
+  const itemsHtml = orderData.orderItems.map(item => {
+    const isGstApplicable = item.menuItem.gstApplicable !== false; // default to true if undefined
+    return `
     <tr>
-      <td>${item.menuItem.name}</td>
+      <td>${item.menuItem.name}${isGstApplicable ? ' <span style="font-size:7pt;">(GST)</span>' : ''}</td>
       <td class="price">${item.priceAtAddition.toFixed(2)}</td>
       <td class="qty">${item.quantity}</td>
       <td class="total">${(item.priceAtAddition * item.quantity).toFixed(2)}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   return `
     <html>
@@ -114,6 +126,8 @@ const generateBillHtml = (orderData: Order): string => {
         <div class="bill-summary">
           <div class="summary-row"><span>Subtotal:</span><span>₹${orderData.subtotal.toFixed(2)}</span></div>
           ${orderData.taxAmount > 0 ? `
+            ${nonGstSubtotal > 0 ? `<div class="summary-row"><span>Non-GST Amount:</span><span>₹${nonGstSubtotal.toFixed(2)}</span></div>` : ''}
+            ${gstApplicableSubtotal > 0 ? `<div class="summary-row"><span>GST Applicable Amount:</span><span>₹${gstApplicableSubtotal.toFixed(2)}</span></div>` : ''}
             <div class="summary-row"><span>Tax (18%):</span><span>₹${orderData.taxAmount.toFixed(2)}</span></div>
           ` : ''}
           <div class="summary-row grand-total"><span>GRAND TOTAL:</span><span>₹${orderData.totalAmount.toFixed(2)}</span></div>
@@ -327,7 +341,16 @@ const OrderPage: React.FC = () => {
     try {
       // Construct finalOrder with 'paid' status
       const subtotal = orderItems.reduce((total, item) => total + (item.priceAtAddition * item.quantity), 0);
-      const taxAmount = subtotal * 0.18;
+      
+      // Only apply GST (18%) to items where gstApplicable is true
+      const gstApplicableSubtotal = orderItems.reduce((total, item) => {
+        // Check if the menu item has gstApplicable set to true
+        // If gstApplicable is undefined (for backward compatibility), default to true
+        const isGstApplicable = item.menuItem.gstApplicable !== false; // default to true if undefined
+        return isGstApplicable ? total + (item.priceAtAddition * item.quantity) : total;
+      }, 0);
+      
+      const taxAmount = gstApplicableSubtotal * 0.18;
       const totalAmount = subtotal + taxAmount;
 
       const finalOrder: Order = {
@@ -723,7 +746,16 @@ const OrderPage: React.FC = () => {
     try {
       // Calculate order totals
       const subtotal = orderItems.reduce((total, item) => total + (item.priceAtAddition * item.quantity), 0);
-      const taxAmount = subtotal * 0.18; // 18% tax rate
+      
+      // Only apply GST (18%) to items where gstApplicable is true
+      const gstApplicableSubtotal = orderItems.reduce((total, item) => {
+        // Check if the menu item has gstApplicable set to true
+        // If gstApplicable is undefined (for backward compatibility), default to true
+        const isGstApplicable = item.menuItem.gstApplicable !== false; // default to true if undefined
+        return isGstApplicable ? total + (item.priceAtAddition * item.quantity) : total;
+      }, 0);
+      
+      const taxAmount = gstApplicableSubtotal * 0.18; // 18% tax rate
       const totalAmount = subtotal + taxAmount;
       
       // Create order object
