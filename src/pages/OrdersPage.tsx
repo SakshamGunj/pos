@@ -59,17 +59,34 @@ const OrdersPage: React.FC = () => {
         
         let fetchedOrders;
         
+        // Log current filter state for debugging
+        console.log('Current filters:', { 
+          statusFilter, 
+          selectedSessionId, 
+          dateRange: { startDate: dateRange.startDate, endDate: dateRange.endDate },
+          search
+        });
+        
         // Filter by session if a specific session is selected
         if (selectedSessionId !== 'all') {
+          console.log('Fetching orders for session:', selectedSessionId);
           fetchedOrders = await getOrdersBySession(selectedSessionId);
+          console.log(`Found ${fetchedOrders.length} orders for session ${selectedSessionId}`);
           
           // Apply status filter if needed
           if (statusFilter !== 'All') {
+            const beforeCount = fetchedOrders.length;
             fetchedOrders = fetchedOrders.filter(order => order.status === statusFilter);
+            console.log(`Filtered by status: ${beforeCount} -> ${fetchedOrders.length} orders`);
+          }
+          
+          if (fetchedOrders.length === 0) {
+            showNotification('info', `No orders found for the selected session${statusFilter !== 'All' ? ' and status' : ''}`);
           }
         } 
         // Filter by date range
         else if (dateRange.startDate && dateRange.endDate) {
+          console.log('Fetching orders for date range:', dateRange.startDate, 'to', dateRange.endDate);
           const startDate = new Date(dateRange.startDate);
           startDate.setHours(0, 0, 0, 0);
           
@@ -77,42 +94,77 @@ const OrdersPage: React.FC = () => {
           endDate.setHours(23, 59, 59, 999);
           
           fetchedOrders = await getOrdersByDateRange(startDate, endDate);
+          console.log(`Found ${fetchedOrders.length} orders for date range`);
           
           // Apply status filter if needed
           if (statusFilter !== 'All') {
+            const beforeCount = fetchedOrders.length;
             fetchedOrders = fetchedOrders.filter(order => order.status === statusFilter);
+            console.log(`Filtered by status: ${beforeCount} -> ${fetchedOrders.length} orders`);
+          }
+          
+          if (fetchedOrders.length === 0) {
+            showNotification('info', `No orders found for the selected date range${statusFilter !== 'All' ? ' and status' : ''}`);
           }
         }
         // Apply only status filter
         else {
           if (statusFilter === 'All') {
             fetchedOrders = await getOrders();
+            console.log(`Found ${fetchedOrders.length} total orders`);
           } else {
             fetchedOrders = await getOrdersByStatus(statusFilter);
+            console.log(`Found ${fetchedOrders.length} orders with status: ${statusFilter}`);
           }
         }
         
-        setOrders(fetchedOrders);
+        setOrders(fetchedOrders || []);
       } catch (err) {
         console.error('Error fetching orders:', err);
         setError('Failed to load orders. Please try again.');
         showNotification('error', 'Failed to load orders');
+        setOrders([]);
       } finally {
         setIsLoading(false);
       }
     };
     
     fetchOrders();
-  }, [statusFilter, selectedSessionId, dateRange, showNotification]);
+  }, [statusFilter, selectedSessionId, dateRange.startDate, dateRange.endDate, showNotification]);
 
   // Filter orders based on search term
   const filteredOrders = useMemo(() => {
-    if (!search) return orders;
-    return orders.filter(order => 
-      order.id.toLowerCase().includes(search.toLowerCase()) ||
-      order.tableId.toLowerCase().includes(search.toLowerCase()) ||
-      order.orderItems.some(item => item.menuItem.name.toLowerCase().includes(search.toLowerCase()))
-    );
+    if (!search.trim()) return orders;
+    
+    const searchTerm = search.toLowerCase().trim();
+    return orders.filter(order => {
+      // Check order ID
+      if (order.id?.toLowerCase().includes(searchTerm)) return true;
+      
+      // Check table ID
+      if (order.tableId?.toLowerCase().includes(searchTerm)) return true;
+      
+      // Check order items
+      if (order.orderItems?.some(item => {
+        // Check menu item name
+        if (item.menuItem?.name?.toLowerCase().includes(searchTerm)) return true;
+        
+        // Check category
+        if (item.menuItem?.category?.toLowerCase().includes(searchTerm)) return true;
+        
+        return false;
+      })) return true;
+      
+      // Check customer name if available
+      if (order.customerName?.toLowerCase().includes(searchTerm)) return true;
+      
+      // Check order date (formatted as string)
+      const orderDate = order.orderDate instanceof Date ? order.orderDate : new Date(order.orderDate);
+      const dateStr = orderDate.toLocaleDateString('en-IN');
+      if (dateStr.includes(searchTerm)) return true;
+      
+      return false;
+    });
   }, [search, orders]);
 
   // Handle order status updates
@@ -237,7 +289,24 @@ const OrdersPage: React.FC = () => {
         {/* Advanced Filters */}
         {showFilters && (
           <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Advanced Filters</h3>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-sm font-semibold text-gray-700">Advanced Filters</h3>
+              <button 
+                onClick={() => {
+                  setSelectedSessionId('all');
+                  setDateRange({
+                    startDate: new Date(new Date().setHours(0, 0, 0, 0)).toISOString().split('T')[0],
+                    endDate: new Date().toISOString().split('T')[0]
+                  });
+                  setStatusFilter('All');
+                  setSearch('');
+                  showNotification('success', 'Filters cleared');
+                }}
+                className="text-xs text-primary hover:text-indigo-700 font-medium"
+              >
+                Clear All Filters
+              </button>
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Session Filter */}
@@ -266,7 +335,15 @@ const OrdersPage: React.FC = () => {
                     <input
                       type="date"
                       value={dateRange.startDate}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                      onChange={(e) => {
+                        const newStartDate = e.target.value;
+                        setDateRange(prev => ({
+                          ...prev,
+                          startDate: newStartDate,
+                          // Ensure endDate is not before startDate
+                          endDate: new Date(newStartDate) > new Date(prev.endDate) ? newStartDate : prev.endDate
+                        }));
+                      }}
                       className="w-full p-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary"
                       disabled={selectedSessionId !== 'all'}
                     />
@@ -276,7 +353,15 @@ const OrdersPage: React.FC = () => {
                     <input
                       type="date"
                       value={dateRange.endDate}
-                      onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                      onChange={(e) => {
+                        const newEndDate = e.target.value;
+                        setDateRange(prev => ({
+                          ...prev,
+                          endDate: newEndDate,
+                          // Ensure startDate is not after endDate
+                          startDate: new Date(newEndDate) < new Date(prev.startDate) ? newEndDate : prev.startDate
+                        }));
+                      }}
                       className="w-full p-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary"
                       disabled={selectedSessionId !== 'all'}
                     />

@@ -77,6 +77,29 @@ export const deleteTable = async (id: string) => {
   await deleteDoc(tableRef);
 };
 
+// Function to update all tables with old statuses to the new simplified statuses
+export const updateAllTableStatuses = async () => {
+  const tablesCollection = collection(db, TABLES);
+  const tablesSnapshot = await getDocs(tablesCollection);
+  
+  const updatePromises = tablesSnapshot.docs.map(doc => {
+    const tableData = doc.data();
+    // Convert any status that's not 'Available' or 'Occupied' to 'Available'
+    if (tableData.status !== 'Available' && tableData.status !== 'Occupied') {
+      console.log(`Updating table ${doc.id} from status ${tableData.status} to Available`);
+      return updateDoc(doc.ref, { 
+        status: 'Available',
+        currentOrderId: null // Clear any existing order ID
+      });
+    }
+    return Promise.resolve(); // No update needed
+  });
+  
+  await Promise.all(updatePromises);
+  console.log('All table statuses updated to simplified values');
+  return true;
+};
+
 // Update table status
 export const updateTableStatus = async (id: string, status: TableStatus, currentOrderId?: string) => {
   const tableRef = doc(db, TABLES, id);

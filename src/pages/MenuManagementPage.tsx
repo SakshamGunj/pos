@@ -475,9 +475,9 @@ const MenuManagementPage: React.FC = () => {
                   <div className="text-sm text-gray-900">{getCategoryName(item.category)}</div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">${item.price.toFixed(2)}</div>
+                  <div className="text-sm text-gray-900">₹{item.price.toFixed(2)}</div>
                   {item.costPrice && (
-                    <div className="text-xs text-gray-500">Cost: ${item.costPrice.toFixed(2)}</div>
+                    <div className="text-xs text-gray-500">Cost: ₹{item.costPrice.toFixed(2)}</div>
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -583,7 +583,7 @@ const MenuManagementPage: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-900">{combo.name}</h3>
                 {combo.description && <p className="text-sm text-gray-500 mt-1">{combo.description}</p>}
               </div>
-              <div className="text-xl font-bold text-primary">${combo.price.toFixed(2)}</div>
+              <div className="text-xl font-bold text-primary">₹{combo.price.toFixed(2)}</div>
             </div>
             
             <div className="mt-4">
@@ -853,7 +853,7 @@ const MenuManagementPage: React.FC = () => {
                     {group.options.map((option, index) => (
                       <span key={index} className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-800">
                         {option.name}
-                        {option.priceAdjustment > 0 && <span className="ml-1 text-gray-500">+${option.priceAdjustment.toFixed(2)}</span>}
+                        {option.priceAdjustment > 0 && <span className="ml-1 text-gray-500">+₹{option.priceAdjustment.toFixed(2)}</span>}
                       </span>
                     ))}
                   </div>
@@ -920,7 +920,7 @@ const MenuManagementPage: React.FC = () => {
                         className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${item.available ? 'bg-gray-100 text-gray-800' : 'bg-gray-100 text-gray-400 line-through'}`}
                       >
                         {item.name}
-                        <span className="ml-1 text-gray-500">${item.price.toFixed(2)}</span>
+                        <span className="ml-1 text-gray-500">₹{item.price.toFixed(2)}</span>
                       </span>
                     ))}
                   </div>

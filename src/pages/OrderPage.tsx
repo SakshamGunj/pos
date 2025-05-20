@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MenuItem, OrderItem, Order, MenuCategory } from '../types';
+import { MenuItem, OrderItem, Order, MenuCategory, TableStatus } from '../types';
 import { PaymentMethod } from '../types/session';
 import {
   PlusCircleIcon, MinusCircleIcon, TrashIcon, ShoppingCartIcon, 
@@ -10,13 +10,10 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import MobileOrderSummaryToggle from '../components/MobileOrderSummaryToggle';
 import PaymentMethodModal from '../components/modals/PaymentMethodModal';
-import PrintDialog from '../components/modals/PrintDialog';
-import { AnimatePresence, motion } from 'framer-motion';
 import { getActiveMenuItems, getCategories } from '../firebase/services/menuService';
 import { createOrder, updateOrder, getOrderById } from '../firebase/services/orderService';
 import { updateTableStatus, getTableById } from '../firebase/services/tableService';
 import { processInventoryForOrder, checkMenuItemInventoryAvailability } from '../firebase/services/inventoryService';
-import { printBill } from '../utils/printUtils';
 import { saveOrderToLocalStorage, getOrderFromLocalStorage, removeOrderFromLocalStorage } from '../utils/orderStorageUtils';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSession } from '../contexts/SessionContext';
@@ -29,6 +26,265 @@ const mockCustomers = [
   { id: 'C4', name: 'David Wang', phone: '555-4321', email: 'david@example.com' },
   { id: 'C5', name: 'Eve Brown', phone: '555-8765', email: 'eve@example.com' },
 ];
+
+const generateBillHtml = (orderData: Order): string => {
+  // Logic to generate bill HTML string with inline styles
+  // This will incorporate the CSS previously in PrintDialog.tsx
+  const styles = `
+    body { font-family: 'Arial', sans-serif; font-size: 9pt; margin: 0; padding: 3mm; color: #000; }
+    .bill-header { text-align: center; margin-bottom: 5mm; }
+    .bill-header h3 { font-size: 14pt; font-weight: bold; margin: 0; }
+    .bill-header p { font-size: 8pt; margin: 1mm 0; }
+    .bill-items table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; font-size: 8pt; }
+    .bill-items th, .bill-items td { padding: 1mm; text-align: left; }
+    .bill-items th.qty, .bill-items td.qty { text-align: center; }
+    .bill-items th.price, .bill-items td.price { text-align: right; }
+    .bill-items th.total, .bill-items td.total { text-align: right; }
+    .bill-summary { margin-top: 3mm; font-size: 8pt; }
+    .bill-summary .summary-row { display: flex; justify-content: space-between; padding: 0.5mm 0; }
+    .bill-summary .grand-total { font-weight: bold; font-size: 10pt; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 1mm 0; }
+    .bill-footer { text-align: center; margin-top: 5mm; font-size: 8pt; }
+    hr.dashed { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
+    @media print {
+      @page { margin: 3mm; }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  `;
+
+  const itemsHtml = orderData.orderItems.map(item => `
+    <tr>
+      <td>${item.menuItem.name}</td>
+      <td class="price">${item.priceAtAddition.toFixed(2)}</td>
+      <td class="qty">${item.quantity}</td>
+      <td class="total">${(item.priceAtAddition * item.quantity).toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <html>
+      <head>
+        <title>Bill Receipt - ${orderData.id}</title>
+        <style>
+          ${styles}
+          .action-buttons {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+            gap: 10px;
+          }
+          .action-buttons button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+          }
+          .print-btn {
+            background-color: #4f46e5;
+            color: white;
+          }
+          .cancel-btn {
+            background-color: #ef4444;
+            color: white;
+          }
+          @media print {
+            .action-buttons {
+              display: none;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="bill-header">
+          <h3>Aries Restro and Pub</h3>
+          <p>Gangtok, Sikkim</p>
+          <hr class="dashed" />
+          <h4>TAX INVOICE</h4>
+          <p>Invoice ID: ${orderData.id}</p>
+          <p>Date: ${new Date(orderData.orderDate).toLocaleString()}</p>
+          ${orderData.tableId ? `<p>Table: ${orderData.tableId}</p>` : ''}
+        </div>
+        <div class="bill-items">
+          <table>
+            <thead><tr><th>Item</th><th class="price">Price</th><th class="qty">Qty</th><th class="total">Total</th></tr></thead>
+            <tbody>${itemsHtml}</tbody>
+          </table>
+        </div>
+        <hr class="dashed" />
+        <div class="bill-summary">
+          <div class="summary-row"><span>Subtotal:</span><span>₹${orderData.subtotal.toFixed(2)}</span></div>
+          ${orderData.taxAmount > 0 ? `
+            <div class="summary-row"><span>Tax (18%):</span><span>₹${orderData.taxAmount.toFixed(2)}</span></div>
+          ` : ''}
+          <div class="summary-row grand-total"><span>GRAND TOTAL:</span><span>₹${orderData.totalAmount.toFixed(2)}</span></div>
+        </div>
+        <hr class="dashed" />
+        <div class="bill-footer">
+          <p>Thank you for your visit!</p>
+          <p>FSSAI: 22324001000445</p>
+          <p>GSTIN: 11FYPS5496A1ZT</p>
+          <p>Powered by Aries POS</p>
+        </div>
+        
+        <div class="action-buttons">
+          <button class="print-btn" onclick="printAndClose()">Print Bill</button>
+          <button class="cancel-btn" onclick="cancelAndReturn()">Cancel</button>
+        </div>
+        
+        <script>
+          // Function to handle printing and auto-close
+          function printAndClose() {
+            window.print();
+            // Close the window after printing (with a slight delay)
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          }
+          
+          // Function to handle cancel and return to dashboard
+          function cancelAndReturn() {
+            // Close this window and return to main app
+            window.close();
+            // If window doesn't close (due to browser security), redirect opener if possible
+            if (window.opener && !window.opener.closed) {
+              window.opener.location.href = '/dashboard';
+            }
+          }
+          
+          // Auto-print when the page loads (browser print dialog)
+          window.onload = function() {
+            // Uncomment to auto-print on load
+            // window.print();
+          }
+          
+          // Also handle the case when user completes printing via browser dialog
+          window.addEventListener('afterprint', function() {
+            // Close the window after printing is complete
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          });
+        </script>
+      </body>
+    </html>
+  `;
+};
+
+const generateKotHtml = (kotData: { itemsToPrint: OrderItem[]; orderId: string; tableId?: string; orderNote?: string, restaurantName?: string }): string => {
+  // Logic to generate KOT HTML string with inline styles
+  const styles = `
+    body { font-family: 'Courier New', Courier, monospace; font-size: 12pt; margin: 0; padding: 3mm; color: #000; width: 72mm; box-sizing: border-box; }
+    .kot-header { text-align: center; margin-bottom: 3mm; }
+    .kot-header h3 { font-size: 16pt; font-weight: bold; margin: 0; }
+    .kot-header p { font-size: 10pt; margin: 1mm 0; }
+    .kot-items { margin-bottom: 3mm; }
+    .kot-item { margin-bottom: 1mm; font-size: 12pt;}
+    .kot-item .item-name { font-weight: bold; }
+    .kot-item .item-quantity { font-weight: bold; font-size: 14pt; margin-right: 5px; }
+    .kot-item .item-note { font-size: 10pt; font-style: italic; margin-left: 15px; }
+    .kot-footer { margin-top: 3mm; font-size: 10pt; }
+    hr { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
+    @media print {
+      @page { margin: 2mm; size: 72mm auto; /* Approximate thermal printer width */ }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  `;
+  const itemsHtml = kotData.itemsToPrint.map(item => `
+    <div class="kot-item">
+      <div><span class="item-quantity">${item.quantity}x</span> <span class="item-name">${item.menuItem.name}</span></div>
+      ${(item as any).note ? `<div class="item-note">Note: ${(item as any).note}</div>` : ''}
+    </div>
+  `).join('');
+
+  return `
+    <html>
+      <head>
+        <title>KOT - ${kotData.orderId}</title>
+        <style>
+          ${styles}
+          .action-buttons {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+            gap: 10px;
+          }
+          .action-buttons button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+          }
+          .print-btn {
+            background-color: #4f46e5;
+            color: white;
+          }
+          .cancel-btn {
+            background-color: #ef4444;
+            color: white;
+          }
+          @media print {
+            .action-buttons {
+              display: none;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="kot-header">
+          ${kotData.restaurantName ? `<h3>${kotData.restaurantName}</h3>` : ''}
+          <h3>KITCHEN ORDER TICKET</h3>
+          <p>Order ID: ${kotData.orderId}</p>
+          ${kotData.tableId ? `<p>Table: ${kotData.tableId}</p>` : ''}
+          <p>Date: ${new Date().toLocaleString()}</p>
+        </div>
+        <hr />
+        <div class="kot-items">${itemsHtml}</div>
+        ${kotData.orderNote ? `<hr /><div class="kot-footer">Order Note: ${kotData.orderNote}</div>` : ''}
+        
+        <div class="action-buttons">
+          <button class="print-btn" onclick="printAndClose()">Print KOT</button>
+          <button class="cancel-btn" onclick="cancelAndReturn()">Cancel</button>
+        </div>
+        
+        <script>
+          // Function to handle printing and auto-close
+          function printAndClose() {
+            window.print();
+            // Close the window after printing (with a slight delay)
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          }
+          
+          // Function to handle cancel and return to dashboard
+          function cancelAndReturn() {
+            // Close this window and return to main app
+            window.close();
+            // If window doesn't close (due to browser security), redirect opener if possible
+            if (window.opener && !window.opener.closed) {
+              window.opener.location.href = '/dashboard';
+            }
+          }
+          
+          // Auto-print when the page loads (browser print dialog)
+          window.onload = function() {
+            // Uncomment to auto-print on load
+            // window.print();
+          }
+          
+          // Also handle the case when user completes printing via browser dialog
+          window.addEventListener('afterprint', function() {
+            // Close the window after printing is complete
+            setTimeout(function() {
+              window.close();
+            }, 500);
+          });
+        </script>
+      </body>
+    </html>
+  `;
+};
 
 const OrderPage: React.FC = () => {
   const { tableId } = useParams();
@@ -50,20 +306,165 @@ const OrderPage: React.FC = () => {
   
   // UI state
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
   const [showOrderSummary, setShowOrderSummary] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentCompleted, setPaymentCompleted] = useState(false);
-  const [showCustomerModal, setShowCustomerModal] = useState(false);
-  const [showConfirmCancelModal, setShowConfirmCancelModal] = useState(false);
-  
-  // State for KOT Print Dialog
-  const [showKotDialog, setShowKotDialog] = useState(false);
-  const [kotDialogData, setKotDialogData] = useState<{ order: Order; itemsToPrint: OrderItem[] } | null>(null);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
 
-  // State for Bill Print Dialog
-  const [isBillPrintDialogOpen, setIsBillPrintDialogOpen] = useState(false);
-  const [billDataForPrint, setBillDataForPrint] = useState<Order | null>(null);
+  const { processPayment } = useSession();
+
+  const handlePaymentMethodSelected = useCallback(async (paymentMethod: PaymentMethod) => {
+    if (paymentProcessing) return; // Prevent multiple submissions
+
+    // Validate tableId before proceeding
+    if (!tableId) {
+      console.error("Table ID is missing. Cannot process payment.");
+      // Optionally, set an error state here to inform the user
+      // e.g., setToast({ open: true, message: "Error: Table ID is missing.", type: "error" });
+      return;
+    }
+
+    setPaymentProcessing(true);
+    try {
+      // Construct finalOrder with 'paid' status
+      const subtotal = orderItems.reduce((total, item) => total + (item.priceAtAddition * item.quantity), 0);
+      const taxAmount = subtotal * 0.18;
+      const totalAmount = subtotal + taxAmount;
+
+      const finalOrder: Order = {
+        id: orderId || uuidv4(),
+        tableId: tableId!, // tableId is validated to be non-null/undefined before this point
+        orderItems,
+        status: 'paid',
+        orderDate: new Date(),
+        orderNote,
+        subtotal: subtotal,
+        taxAmount: taxAmount,
+        totalAmount: totalAmount,
+        paymentMethod: paymentMethod, // The paymentMethod used for this order
+      };
+
+      // 1. CRITICAL OPERATIONS - These must complete for the payment to be considered successful
+      console.log('Saving order with paid status to database...');
+      await updateOrder(finalOrder.id, finalOrder);
+      console.log('Order saved successfully with status: paid');
+
+      console.log('Processing payment transaction...');
+      await processPayment(finalOrder.id, finalOrder.totalAmount, paymentMethod);
+      console.log('Payment processed successfully');
+      
+      console.log('Updating table status...');
+      if (tableId) {
+        await updateTableStatus(tableId, 'available' as TableStatus);
+        console.log(`Table ${tableId} status set to available after payment`);
+      }
+
+      // 2. CLEAR ORDER STATE - This happens regardless of print success
+      console.log('Clearing order state...');
+      setOrderItems([]);
+      setOrderNote('');
+      setSelectedCustomer(null);
+      setOrderId(null);
+      setOrderStatus('draft');
+      if (tableId) {
+        removeOrderFromLocalStorage(tableId);
+        console.log(`Cleared local storage for table ${tableId}`);
+      }
+      // Note: We don't clear tableId here because it's from the URL params
+      // and we're still on the same table's page
+
+      // 3. CLOSE PAYMENT MODAL AND SHOW SUCCESS
+      setShowPaymentModal(false);
+      showNotification('success', 'Payment completed and order saved!');
+      
+      // 4. ATTEMPT TO PRINT - This is optional and doesn't affect payment completion
+      console.log('Attempting to open print window...');
+      try {
+        const billHtml = generateBillHtml(finalOrder);
+        // Open in a new tab in the same browser window
+        // The third parameter (features) is intentionally left empty to open as a tab, not a window
+        const printWindow = window.open('about:blank', '_blank');
+        if (printWindow) {
+          printWindow.document.write(billHtml);
+          printWindow.document.close();
+          // Focus the window to bring it to front
+          printWindow.focus();
+          console.log('Print window opened successfully');
+        } else {
+          console.warn('Print window could not be opened - likely blocked by browser');
+          showNotification("info", "Print window couldn't be opened. Check pop-up settings. Payment is still complete.");
+        }
+      } catch (printError) {
+        console.error('Error during print attempt:', printError);
+        showNotification("info", "Could not open print window, but payment is complete.");
+      } 
+
+    } catch (err) {
+      console.error("Error processing payment or order: ", err);
+      // Refactored error handling
+      let errorMessage = "An unexpected error occurred.";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      showNotification('error', `Payment failed: ${errorMessage}`);
+    } finally {
+      setPaymentProcessing(false);
+    }
+  }, [orderId, orderItems, orderNote, processPayment, showNotification, tableId]);
+
+  const handlePrintKOT = useCallback(async () => {
+    if (!orderId || orderItems.length === 0) {
+      showNotification("info", "No items to print KOT for.");
+      return;
+    }
+
+    const newItemsForKOT = orderItems.filter(item => !item.kotPrinted);
+    if (newItemsForKOT.length === 0) {
+      showNotification("info", "All items have already been sent to the kitchen.");
+      return;
+    }
+
+    const kotDataForPrint = {
+      itemsToPrint: newItemsForKOT,
+      orderId: orderId,
+      tableId: tableId,
+      orderNote: orderNote,
+      restaurantName: 'Your Restaurant'
+    };
+
+    // Generate HTML and print KOT in new tab
+    const kotHtml = generateKotHtml(kotDataForPrint);
+    // Open in a new tab in the same browser window by using '_blank' without window features
+    // The third parameter (features) is intentionally left empty to open as a tab, not a window
+    const printWindow = window.open('about:blank', '_blank');
+    if (printWindow) {
+      printWindow.document.write(kotHtml);
+      printWindow.document.close();
+      // Focus the window to bring it to front
+      printWindow.focus();
+      // Printing is handled by onload script in the HTML
+    } else {
+      showNotification("error", "Failed to open KOT print window. Please check pop-up blocker settings.");
+    }
+
+    // Mark items as KOT printed in the main order state
+    const updatedOrderItems = orderItems.map(item => 
+      newItemsForKOT.find(newItem => newItem.id === item.id) ? { ...item, kotPrinted: true } : item
+    );
+    setOrderItems(updatedOrderItems);
+    showNotification("success", "KOT sent to kitchen.");
+
+    // Persist changes to KOT printed status (optional, if order is already saved as draft)
+    // This assumes orderId exists and you want to update the draft order in DB
+    // If order is only saved on payment, this might not be necessary here
+    // Or, you might save the order as 'confirmed' here
+    if (orderStatus === 'draft' || orderStatus === 'confirmed') {
+        const currentOrderData = await getOrderById(orderId); // Fetch current order
+        if (currentOrderData) {
+            await updateOrder(orderId, { ...currentOrderData, orderItems: updatedOrderItems, status: 'confirmed' });
+        }
+    }    
+
+  }, [orderId, orderItems, orderNote, showNotification, tableId, orderStatus]);
 
   // Load menu items, categories, and existing order from Firebase/localStorage
   useEffect(() => {
@@ -126,14 +527,13 @@ const OrderPage: React.FC = () => {
     fetchData();
   }, [tableId]);
   
-  // Filter menu items based on search and category
+  // Filter menu items based on search term
   const filteredMenuItems = useMemo(() => {
     return menuItems.filter(item => {
-      const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-      const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesCategory && matchesSearch;
+      const searchTermMatch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
+      return searchTermMatch;
     });
-  }, [menuItems, searchTerm, selectedCategory]);
+  }, [menuItems, searchTerm]);
   
   // Handle adding item to order
   const handleAddItemToOrder = useCallback(async (menuItem: MenuItem) => {
@@ -233,11 +633,14 @@ const OrderPage: React.FC = () => {
       if (existingItemIndex > -1) {
         const updatedItems = [...prevItems];
         const itemName = updatedItems[existingItemIndex].menuItem.name;
+        const currentQuantity = updatedItems[existingItemIndex].quantity;
         
-        if (updatedItems[existingItemIndex].quantity > 1) {
-          updatedItems[existingItemIndex].quantity -= 1;
+        if (currentQuantity > 1) {
+          // Explicitly set the new quantity to current - 1 to avoid any double decrementing
+          const newQuantity = currentQuantity - 1;
+          updatedItems[existingItemIndex].quantity = newQuantity;
+          
           // Show notification that item quantity was decreased
-          const newQuantity = updatedItems[existingItemIndex].quantity;
           showNotification('info', `Updated: ${itemName} × ${newQuantity}`);
           return updatedItems;
         } else {
@@ -248,7 +651,7 @@ const OrderPage: React.FC = () => {
           if (prevItems.length === 1) {
             // Update table status to Available
             if (tableId) {
-              updateTableStatus(tableId, 'Available')
+              updateTableStatus(tableId, 'Available' as TableStatus)
                 .then(() => {
                   console.log('Table status updated to Available');
                 })
@@ -320,7 +723,7 @@ const OrderPage: React.FC = () => {
     try {
       // Calculate order totals
       const subtotal = orderItems.reduce((total, item) => total + (item.priceAtAddition * item.quantity), 0);
-      const taxAmount = subtotal * 0.05; // 5% tax rate - this should be configurable
+      const taxAmount = subtotal * 0.18; // 18% tax rate
       const totalAmount = subtotal + taxAmount;
       
       // Create order object
@@ -447,7 +850,6 @@ const OrderPage: React.FC = () => {
       // Remove from localStorage since the order is cancelled
       removeOrderFromLocalStorage(tableId);
       
-      setShowConfirmCancelModal(false);
       alert('Order cancelled!');
       
       // Navigate back to table selection
@@ -455,63 +857,11 @@ const OrderPage: React.FC = () => {
     } catch (error) {
       console.error('Error cancelling order:', error);
       alert('Failed to cancel order. Please try again.');
-      setShowConfirmCancelModal(false);
     }
   }, [navigate, tableId]);
   
-  // Handle payment
-  // Handle payment with payment method
-  const { processPayment } = useSession();
-  
-  const handlePaymentMethodSelected = useCallback(async (paymentMethod: PaymentMethod) => {
-    try {
-      // Process the payment and record it in the session
-      if (orderId) {
-        await processPayment(orderId, orderTotal, paymentMethod);
-        showNotification('success', `Payment of ${formatCurrency(orderTotal)} processed via ${paymentMethod}`);
-        setPaymentCompleted(true);
-      } else {
-        showNotification('error', 'Order ID not found');
-      }
-    } catch (error: any) {
-      console.error('Payment error:', error);
-      showNotification('error', error.message || 'Payment processing failed');
-    }
-  }, [orderId, orderTotal, processPayment, showNotification]);
-  
-  // Handle order completion after payment
-  const handleCompleteAfterPayment = useCallback(() => {
-    setShowPaymentModal(false);
-    handleCompleteOrder();
-  }, [handleCompleteOrder]);
-  
   // Render category buttons
-  const renderCategoryButtons = () => {
-    const categoryButtons = [
-      <button
-        key="all"
-        className={`px-4 py-2 text-sm rounded-full ${selectedCategory === 'All' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-800'}`}
-        onClick={() => setSelectedCategory('All')}
-      >
-        All
-      </button>
-    ];
-    
-    // Add buttons for each category from Firebase
-    categories.forEach(category => {
-      categoryButtons.push(
-        <button
-          key={category.id}
-          className={`px-4 py-2 text-sm rounded-full ${selectedCategory === category.id ? 'bg-primary text-white' : 'bg-gray-100 text-gray-800'}`}
-          onClick={() => setSelectedCategory(category.id)}
-        >
-          {category.name}
-        </button>
-      );
-    });
-    
-    return categoryButtons;
-  };
+  // Removed category buttons
   
   // Render menu items
   const renderMenuItems = () => {
@@ -534,7 +884,7 @@ const OrderPage: React.FC = () => {
     if (filteredMenuItems.length === 0) {
       return (
         <div className="flex justify-center items-center h-64">
-          <div className="text-gray-500">No menu items found. Try a different search or category.</div>
+          <div className="text-gray-500">No menu items found. Try a different search.</div>
         </div>
       );
     }
@@ -663,21 +1013,7 @@ const OrderPage: React.FC = () => {
             {orderStatus === 'placed' && (
               <button
                 className="inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
-                onClick={() => {
-                  // Get the existing order from localStorage
-                  const existingOrder = getOrderFromLocalStorage(tableId || '');
-                  if (existingOrder) {
-                    const itemsToPrint = existingOrder.orderItems.filter(item => !item.kotPrinted);
-                    if (itemsToPrint.length > 0) {
-                      setKotDialogData({ order: existingOrder, itemsToPrint });
-                      setShowKotDialog(true);
-                    } else {
-                      showNotification('info', 'No new items to print for KOT.');
-                    }
-                  } else {
-                    showNotification('error', 'Could not find order data to print KOT.');
-                  }
-                }}
+                onClick={handlePrintKOT}
               >
                 <DocumentDuplicateIcon className="-ml-1 mr-2 h-5 w-5" />
                 Print KOT (New Items)
@@ -687,7 +1023,7 @@ const OrderPage: React.FC = () => {
             {orderStatus !== 'completed' && orderStatus !== 'cancelled' && (
               <button
                 className="inline-flex justify-center items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                onClick={() => setShowConfirmCancelModal(true)}
+                onClick={() => handleCancelOrder()}
               >
                 Cancel Order
               </button>
@@ -723,7 +1059,7 @@ const OrderPage: React.FC = () => {
         <div className="lg:grid lg:grid-cols-3 lg:gap-8">
           {/* Menu section */}
           <div className="lg:col-span-2">
-            {/* Search and filters */}
+            {/* Search */}
             <div className="mb-6">
               <div className="relative rounded-md shadow-sm mb-4">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -748,14 +1084,10 @@ const OrderPage: React.FC = () => {
                   </div>
                 )}
               </div>
-              
-              <div className="flex space-x-2 overflow-x-auto pb-2">
-                {renderCategoryButtons()}
-              </div>
             </div>
             
             {/* Menu items grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 overflow-y-auto max-h-[60vh]">
               {renderMenuItems()}
             </div>
           </div>
@@ -766,7 +1098,7 @@ const OrderPage: React.FC = () => {
           </div>
           
           {/* Order summary section - mobile */}
-          <AnimatePresence>
+          {/* <AnimatePresence>
             {showOrderSummary && (
               <motion.div
                 initial={{ opacity: 0, y: 50 }}
@@ -792,7 +1124,7 @@ const OrderPage: React.FC = () => {
                 </div>
               </motion.div>
             )}
-          </AnimatePresence>
+          </AnimatePresence> */}
           
           {/* Payment Method Modal */}
           <PaymentMethodModal
@@ -801,151 +1133,6 @@ const OrderPage: React.FC = () => {
             onPaymentComplete={handlePaymentMethodSelected}
             orderTotal={orderTotal}
           />
-          
-          {/* KOT Print Dialog */}
-          {showKotDialog && kotDialogData && (
-            <PrintDialog
-              isOpen={showKotDialog}
-              onClose={() => setShowKotDialog(false)}
-              type="KOT"
-              orderData={kotDialogData.order}
-              itemsToRender={kotDialogData.itemsToPrint}
-              onPrintComplete={() => {
-                setShowKotDialog(false);
-                // Mark KOT printed items as not new
-                const updatedOrderItems = orderItems.map(item => {
-                  if (kotDialogData.itemsToPrint.some(kotItem => kotItem.id === item.id)) {
-                    return { ...item, isNew: false };
-                  }
-                  return item;
-                });
-                setOrderItems(updatedOrderItems);
-                
-                // Update the order in localStorage
-                if (tableId) {
-                  const currentFullOrder = getOrderFromLocalStorage(tableId);
-                  if (currentFullOrder) {
-                    saveOrderToLocalStorage(tableId, { ...currentFullOrder, orderItems: updatedOrderItems });
-                  }
-                }
-                showNotification('success', 'KOT Printed!');
-              }}
-            />
-          )}
-
-          {/* Bill Print Dialog */}
-          {isBillPrintDialogOpen && billDataForPrint && (
-            <PrintDialog
-              isOpen={isBillPrintDialogOpen}
-              onClose={() => {
-                setIsBillPrintDialogOpen(false);
-                setBillDataForPrint(null);
-              }}
-              type="BILL"
-              orderData={billDataForPrint}
-              // itemsToRender is not typically needed for BILL type if it prints the whole order
-              onPrintComplete={() => {
-                setIsBillPrintDialogOpen(false);
-                setBillDataForPrint(null);
-                showNotification('success', 'Bill ready for printing!');
-                // Potentially add other logic after bill print dialog is confirmed, e.g., marking order as 'printed'
-              }}
-            />
-          )}
-
-          {/* Bill Printing and Order Completion (after payment) */}
-          {paymentCompleted && (
-            <div className="fixed inset-0 z-50 overflow-y-auto">
-              <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-                  <div className="absolute inset-0 bg-gray-500 opacity-75" onClick={() => setShowPaymentModal(false)}></div>
-                </div>
-                
-                <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-                
-                <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
-                  <div className="text-center">
-                    <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
-                      <CheckCircleIcon className="h-8 w-8 text-green-600" aria-hidden="true" />
-                    </div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">Payment Successful!</h3>
-                    <p className="text-sm text-gray-500 mb-6">
-                      {formatCurrency(orderTotal)} has been processed.
-                    </p>
-                    
-                    <div className="space-y-3">
-                      <button
-                        type="button"
-                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
-                        onClick={() => {
-                          // Get the existing order
-                          const existingOrder = getOrderFromLocalStorage(tableId || '');
-                          if (existingOrder) {
-                            setBillDataForPrint(existingOrder);
-                            setIsBillPrintDialogOpen(true);
-                            // showNotification('success', 'Bill printed successfully'); // Notification can be shown after print confirmation or in dialog
-                          }
-                        }}
-                      >
-                        <ReceiptRefundIcon className="-ml-1 mr-2 h-5 w-5" />
-                        Print Bill
-                      </button>
-                      
-                      <button
-                        type="button"
-                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-primary text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-                        onClick={handleCompleteAfterPayment}
-                      >
-                        Complete Order
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Confirm Cancel Modal */}
-          {showConfirmCancelModal && (
-            <div className="fixed inset-0 z-50 overflow-y-auto">
-              <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-                  <div className="absolute inset-0 bg-gray-500 opacity-75" onClick={() => setShowConfirmCancelModal(false)}></div>
-                </div>
-                
-                <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-                
-                <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
-                  <div className="sm:flex sm:items-start">
-                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                      <h3 className="text-lg leading-6 font-medium text-gray-900">Cancel Order</h3>
-                      <div className="mt-2">
-                        <p className="text-sm text-gray-500">
-                          Are you sure you want to cancel this order? This action cannot be undone.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
-                    <button
-                      type="button"
-                      className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
-                      onClick={handleCancelOrder}
-                    >
-                      Cancel Order
-                    </button>
-                    <button
-                      type="button"
-                      className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary sm:mt-0 sm:w-auto sm:text-sm"
-                      onClick={() => setShowConfirmCancelModal(false)}
-                    >
-                      Go Back
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </main>
     </div>

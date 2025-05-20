@@ -1,4 +1,6 @@
-export type TableStatus = 'Available' | 'Occupied' | 'Reserved' | 'Cleaning';
+import { PaymentMethod } from './session';
+
+export type TableStatus = 'Available' | 'Occupied';
 export type TableArea = 'Main Dining' | 'Patio' | 'Bar' | 'VIP Room' | 'Counter';
 
 export interface Table {
@@ -240,6 +242,8 @@ export interface Order {
   orderDate: Date;
   orderNote?: string;
   sessionId?: string | null; // ID of the session this order belongs to
+  customerName?: string; // Name of the customer
+  paymentMethod?: PaymentMethod; // Made optional, as it's not known when order is initially placed
   // Future: customerId, paymentDetails, discountsApplied
 }
 

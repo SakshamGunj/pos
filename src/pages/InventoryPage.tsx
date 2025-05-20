@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Container, Typography, Box, Button, Grid, Paper, TextField, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert, Tabs, Tab, Chip } from '@mui/material';
-import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, ArrowBack as ArrowBackIcon, Refresh as RefreshIcon, Warning as WarningIcon, Dashboard as DashboardIcon, Inventory as InventoryIcon, Restaurant as RestaurantIcon } from '@mui/icons-material';
+import { Container, Typography, Box, Button, Grid, Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, TextField } from '@mui/material';
+import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, ArrowBack as ArrowBackIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { InventoryItem, InventoryUnit } from '../types';
 import { getAllInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem } from '../firebase/services/inventoryService';
-import InventoryDashboard from '../components/InventoryDashboard';
+// Removed InventoryDashboard import as we're only showing Menu Inventory
 import MenuInventoryView from '../components/MenuInventoryView';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import { formatCurrency } from '../utils/formatUtils';
 
 // Tab panel component
 interface TabPanelProps {
@@ -45,6 +46,7 @@ const InventoryPage: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
+  // We're only showing Menu Inventory tab now
   const [activeTab, setActiveTab] = useState(0);
 
   // Units for dropdown
@@ -215,126 +217,15 @@ const InventoryPage: React.FC = () => {
         </Box>
       </Box>
       
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-        <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)} aria-label="inventory tabs">
-          <Tab icon={<DashboardIcon />} label="Dashboard" />
-          <Tab icon={<InventoryIcon />} label="Inventory Items" />
-          <Tab icon={<RestaurantIcon />} label="Menu Inventory" />
-        </Tabs>
+      {/* Only showing Menu Inventory tab */}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h6" component="h2" gutterBottom>
+          Menu Inventory
+        </Typography>
       </Box>
 
-      <TabPanel value={activeTab} index={0}>
-        <InventoryDashboard />
-      </TabPanel>
-      
-      <TabPanel value={activeTab} index={1}>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-
-        <Box mb={3}>
-          <Grid container spacing={2} alignItems="center">
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6', md: 'span 4' } }}>
-              <TextField
-                fullWidth
-                label="Search Inventory"
-                variant="outlined"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </Grid>
-            
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6', md: 'span 4' } }}>
-              <FormControl fullWidth>
-                <InputLabel id="filter-label">Filter</InputLabel>
-                <Select
-                  labelId="filter-label"
-                  value={filterLowStock ? 'low' : 'all'}
-                  label="Filter"
-                  onChange={(e: SelectChangeEvent) => setFilterLowStock(e.target.value === 'low')}
-                >
-                  <MenuItem value="all">All Items</MenuItem>
-                  <MenuItem value="low">Low Stock Only</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-        </Box>
-
-        {loading ? (
-          <Box display="flex" justifyContent="center" p={4}>
-            <LoadingSpinner text="Loading inventory..." />
-          </Box>
-        ) : filteredItems.length === 0 ? (
-          <Alert severity="info">
-            No inventory items found. {searchTerm && 'Try a different search term.'}
-          </Alert>
-        ) : (
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead sx={{ backgroundColor: 'primary.main' }}>
-                <TableRow>
-                  <TableCell sx={{ color: 'white' }}>Name</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Current Stock</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Unit</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Min Stock Level</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Status</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Cost Per Unit</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Last Restock</TableCell>
-                  <TableCell sx={{ color: 'white' }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredItems.map((item) => (
-                  <TableRow key={item.id} hover>
-                    <TableCell>{item.name}</TableCell>
-                    <TableCell>{item.currentStock}</TableCell>
-                    <TableCell>{item.unit}</TableCell>
-                    <TableCell>{item.minStockLevel}</TableCell>
-                    <TableCell>
-                      {item.currentStock === 0 ? (
-                        <Chip label="Out of Stock" color="error" size="small" />
-                      ) : item.currentStock < item.minStockLevel ? (
-                        <Chip label="Low Stock" color="warning" size="small" />
-                      ) : (
-                        <Chip label="In Stock" color="success" size="small" />
-                      )}
-                    </TableCell>
-                    <TableCell>₹{item.costPerUnit.toFixed(2)}</TableCell>
-                    <TableCell>
-                      {new Date(item.lastRestockDate).toLocaleDateString('en-IN')}
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleEdit(item)}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDelete(item.id)}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </TabPanel>
-      
-      <TabPanel value={activeTab} index={2}>
-        <MenuInventoryView />
-      </TabPanel>
+      {/* Menu Inventory View */}
+      <MenuInventoryView />
 
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>

@@ -18,14 +18,14 @@ const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
   orderTotal
 }) => {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
-  const [paymentCompleted, setPaymentCompleted] = useState(false);
+  const [paymentCompleted, setPaymentCompleted] = useState(false); // This will largely be bypassed by the main flow
 
   const handlePayment = () => {
     if (!selectedMethod) return;
     
-    // Process payment with selected method
-    onPaymentComplete(selectedMethod);
-    setPaymentCompleted(true);
+    onPaymentComplete(selectedMethod); // Propagate to OrderPage
+    onClose(); // Close this modal immediately
+    // setPaymentCompleted(true); // We are bypassing this internal state for the main flow
   };
 
   const resetModal = () => {
@@ -37,7 +37,7 @@ const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
   return (
     <Dialog
       open={isOpen}
-      onClose={() => !paymentCompleted && onClose()}
+      onClose={resetModal} // Changed to always call resetModal
       className="relative z-50"
     >
       <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
@@ -122,6 +122,9 @@ const PaymentMethodModal: React.FC<PaymentMethodModalProps> = ({
                 </div>
               </>
             ) : (
+              // This section will no longer be displayed as part of the primary payment flow
+              // because handlePayment now calls onClose() directly.
+              // It's kept here for structural completeness or if any other path might set paymentCompleted.
               <div className="text-center py-6">
                 <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
                   <CheckCircleIcon className="h-8 w-8 text-green-600" aria-hidden="true" />

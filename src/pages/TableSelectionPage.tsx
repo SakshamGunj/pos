@@ -3,12 +3,12 @@ import TableCard from '../components/TableCard';
 import OrdersDashboard from '../components/OrdersDashboard';
 import { Table, TableArea, TableStatus } from '../types';
 import { FunnelIcon, MagnifyingGlassIcon, MapPinIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline';
-import { getAllTables, getTablesByArea, getTablesByStatus, checkTablesCollection } from '../firebase/services/tableService';
+import { getAllTables, getTablesByArea, getTablesByStatus, checkTablesCollection, updateAllTableStatuses } from '../firebase/services/tableService';
 
 // Tables are now fetched from Firebase
 
 const tableAreas: TableArea[] = ['Main Dining'];
-const tableStatuses: TableStatus[] = ['Available', 'Occupied', 'Reserved', 'Cleaning'];
+const tableStatuses: TableStatus[] = ['Available', 'Occupied'];
 
 // Restaurant info will be fetched from Firebase in the future
 const restaurantInfo = {
@@ -23,14 +23,50 @@ const TableSelectionPage: React.FC = () => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
+  // Auto-fix table statuses when the page loads
+  useEffect(() => {
+    const fixTableStatuses = async () => {
+      try {
+        console.log('Auto-fixing table statuses...');
+        await updateAllTableStatuses();
+        console.log('Table statuses fixed automatically');
+      } catch (error) {
+        console.error('Error auto-fixing table statuses:', error);
+      }
+    };
+    
+    fixTableStatuses();
+  }, []);
+  
   // Fetch tables from Firebase
+  // Function to handle status filter changes
+  const handleStatusFilter = (status: TableStatus) => {
+    setSelectedStatus(status);
+  };
+
+  // Function to fix all table statuses
+  const handleFixTableStatuses = async () => {
+    try {
+      setLoading(true);
+      await updateAllTableStatuses();
+      // Refresh the table list
+      const updatedTables = await getAllTables();
+      setTables(updatedTables);
+      alert('All table statuses have been updated to either Available or Occupied!');
+    } catch (error) {
+      console.error('Error fixing table statuses:', error);
+      alert('Failed to update table statuses. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     const fetchTables = async () => {
+      setIsLoading(true);
       try {
-        setIsLoading(true);
-        setError(null);
-
         // Check if tables collection exists
         await checkTablesCollection();
 
@@ -117,16 +153,24 @@ const TableSelectionPage: React.FC = () => {
 
           <div className="flex-1 min-w-0">
             <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1.5">Status:</label>
-            <div className="flex flex-wrap gap-1.5 sm:gap-2">
-            {['All', ...tableStatuses].map(status => (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {tableStatuses.map((status) => (
                 <button
                   key={status}
-                  onClick={() => setSelectedStatus(status as TableStatus | 'All')}
-                  className={`px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm rounded-md transition-colors ${selectedStatus === status ? 'bg-primary text-white shadow-md' : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200'}`}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md ${selectedStatus === status ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  onClick={() => handleStatusFilter(status)}
                 >
                   {status}
                 </button>
               ))}
+              {/* Button to fix table statuses */}
+              <button
+                className="px-3 py-1.5 text-sm font-medium rounded-md bg-amber-100 text-amber-700 hover:bg-amber-200 flex items-center"
+                onClick={handleFixTableStatuses}
+                disabled={loading}
+              >
+                {loading ? 'Updating...' : 'Fix Table Statuses'}
+              </button>
             </div>
           </div>
         </div>
