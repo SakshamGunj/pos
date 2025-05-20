@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { MenuItem, OrderItem as OrderItemType, MenuCategory, Order } from '../types';
+import { MenuItem, OrderItem, Order, MenuCategory } from '../types';
 import { PaymentMethod } from '../types/session';
 import {
   PlusCircleIcon, MinusCircleIcon, TrashIcon, ShoppingCartIcon, 
@@ -10,19 +10,17 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import MobileOrderSummaryToggle from '../components/MobileOrderSummaryToggle';
 import PaymentMethodModal from '../components/modals/PaymentMethodModal';
+import PrintDialog from '../components/modals/PrintDialog';
 import { AnimatePresence, motion } from 'framer-motion';
 import { getActiveMenuItems, getCategories } from '../firebase/services/menuService';
 import { createOrder, updateOrder, getOrderById } from '../firebase/services/orderService';
 import { updateTableStatus, getTableById } from '../firebase/services/tableService';
 import { processInventoryForOrder, checkMenuItemInventoryAvailability } from '../firebase/services/inventoryService';
-import { printKOT, printBill } from '../utils/printUtils';
+import { printBill } from '../utils/printUtils';
 import { saveOrderToLocalStorage, getOrderFromLocalStorage, removeOrderFromLocalStorage } from '../utils/orderStorageUtils';
 import { useNotification } from '../contexts/NotificationContext';
 import { useSession } from '../contexts/SessionContext';
 import { formatCurrency } from '../utils/formatUtils';
-
-// Make sure this matches the Order status type in types/index.ts
-type OrderStatus = 'draft' | 'placed' | 'confirmed' | 'completed' | 'pending' | 'preparing' | 'ready' | 'served' | 'paid' | 'cancelled';
 
 const mockCustomers = [
   { id: 'C1', name: 'Alice Johnson', phone: '555-1234', email: 'alice@example.com' },
@@ -44,8 +42,8 @@ const OrderPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   
   // Order state
-  const [orderItems, setOrderItems] = useState<OrderItemType[]>([]);
-  const [orderStatus, setOrderStatus] = useState<OrderStatus>('draft');
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [orderStatus, setOrderStatus] = useState<Order['status']>('draft');
   const [orderNote, setOrderNote] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -59,6 +57,14 @@ const OrderPage: React.FC = () => {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showConfirmCancelModal, setShowConfirmCancelModal] = useState(false);
   
+  // State for KOT Print Dialog
+  const [showKotDialog, setShowKotDialog] = useState(false);
+  const [kotDialogData, setKotDialogData] = useState<{ order: Order; itemsToPrint: OrderItem[] } | null>(null);
+
+  // State for Bill Print Dialog
+  const [isBillPrintDialogOpen, setIsBillPrintDialogOpen] = useState(false);
+  const [billDataForPrint, setBillDataForPrint] = useState<Order | null>(null);
+
   // Load menu items, categories, and existing order from Firebase/localStorage
   useEffect(() => {
     const fetchData = async () => {
@@ -396,7 +402,7 @@ const OrderPage: React.FC = () => {
       }
       
       // Update the order status in Firebase
-      await updateOrder(existingOrder.id, { status: 'paid' as OrderStatus });
+      await updateOrder(existingOrder.id, { status: 'paid' as Order['status'] });
       
       // Update the table status to Available
       await updateTableStatus(tableId, 'Available');
@@ -429,7 +435,7 @@ const OrderPage: React.FC = () => {
       
       if (existingOrder && existingOrder.id) {
         // Update the order status in Firebase
-        await updateOrder(existingOrder.id, { status: 'cancelled' as OrderStatus });
+        await updateOrder(existingOrder.id, { status: 'cancelled' as Order['status'] });
         
         // Update the table status to Available
         await updateTableStatus(tableId, 'Available');
@@ -661,18 +667,15 @@ const OrderPage: React.FC = () => {
                   // Get the existing order from localStorage
                   const existingOrder = getOrderFromLocalStorage(tableId || '');
                   if (existingOrder) {
-                    // Print KOT only for newly added items (not yet printed)
-                    const printedItems = printKOT(existingOrder, true);
-                    
-                    // Mark items as printed
-                    if (printedItems && printedItems.length > 0) {
-                      setOrderItems(prevItems => prevItems.map(item => 
-                        printedItems.some(pi => pi.id === item.id) ? {...item, kotPrinted: true} : item
-                      ));
-                      showNotification('success', 'KOT printed for new items');
+                    const itemsToPrint = existingOrder.orderItems.filter(item => !item.kotPrinted);
+                    if (itemsToPrint.length > 0) {
+                      setKotDialogData({ order: existingOrder, itemsToPrint });
+                      setShowKotDialog(true);
                     } else {
-                      showNotification('info', 'No new items to print');
+                      showNotification('info', 'No new items to print for KOT.');
                     }
+                  } else {
+                    showNotification('error', 'Could not find order data to print KOT.');
                   }
                 }}
               >
@@ -740,7 +743,7 @@ const OrderPage: React.FC = () => {
                       className="text-gray-400 hover:text-gray-500"
                       onClick={() => setSearchTerm('')}
                     >
-                      <XMarkIcon className="h-5 w-5" aria-hidden="true" />
+                      <XMarkIcon className="h-5 w-5" />
                     </button>
                   </div>
                 )}
@@ -799,6 +802,57 @@ const OrderPage: React.FC = () => {
             orderTotal={orderTotal}
           />
           
+          {/* KOT Print Dialog */}
+          {showKotDialog && kotDialogData && (
+            <PrintDialog
+              isOpen={showKotDialog}
+              onClose={() => setShowKotDialog(false)}
+              type="KOT"
+              orderData={kotDialogData.order}
+              itemsToRender={kotDialogData.itemsToPrint}
+              onPrintComplete={() => {
+                setShowKotDialog(false);
+                // Mark KOT printed items as not new
+                const updatedOrderItems = orderItems.map(item => {
+                  if (kotDialogData.itemsToPrint.some(kotItem => kotItem.id === item.id)) {
+                    return { ...item, isNew: false };
+                  }
+                  return item;
+                });
+                setOrderItems(updatedOrderItems);
+                
+                // Update the order in localStorage
+                if (tableId) {
+                  const currentFullOrder = getOrderFromLocalStorage(tableId);
+                  if (currentFullOrder) {
+                    saveOrderToLocalStorage(tableId, { ...currentFullOrder, orderItems: updatedOrderItems });
+                  }
+                }
+                showNotification('success', 'KOT Printed!');
+              }}
+            />
+          )}
+
+          {/* Bill Print Dialog */}
+          {isBillPrintDialogOpen && billDataForPrint && (
+            <PrintDialog
+              isOpen={isBillPrintDialogOpen}
+              onClose={() => {
+                setIsBillPrintDialogOpen(false);
+                setBillDataForPrint(null);
+              }}
+              type="BILL"
+              orderData={billDataForPrint}
+              // itemsToRender is not typically needed for BILL type if it prints the whole order
+              onPrintComplete={() => {
+                setIsBillPrintDialogOpen(false);
+                setBillDataForPrint(null);
+                showNotification('success', 'Bill ready for printing!');
+                // Potentially add other logic after bill print dialog is confirmed, e.g., marking order as 'printed'
+              }}
+            />
+          )}
+
           {/* Bill Printing and Order Completion (after payment) */}
           {paymentCompleted && (
             <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -822,14 +876,14 @@ const OrderPage: React.FC = () => {
                     <div className="space-y-3">
                       <button
                         type="button"
-                        className="w-full inline-flex justify-center items-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
                         onClick={() => {
                           // Get the existing order
                           const existingOrder = getOrderFromLocalStorage(tableId || '');
                           if (existingOrder) {
-                            // Print bill with all order details
-                            printBill(existingOrder);
-                            showNotification('success', 'Bill printed successfully');
+                            setBillDataForPrint(existingOrder);
+                            setIsBillPrintDialogOpen(true);
+                            // showNotification('success', 'Bill printed successfully'); // Notification can be shown after print confirmation or in dialog
                           }
                         }}
                       >

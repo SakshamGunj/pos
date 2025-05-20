@@ -101,11 +101,11 @@ const Navbar = () => {
     { to: "/kds", text: "KDS", icon: FireIcon },
     { to: "/kitchen", text: "Kitchen", icon: ClipboardDocumentListIcon },
     { to: "/menu", text: "Menu", icon: BookOpenIcon },
-    { to: "/inventory", text: "Inventory", icon: CubeIcon },
   ];
 
   // Group 2: Secondary navigation items
   const secondaryNavItems = [
+    { to: "/inventory", text: "Inventory", icon: CubeIcon },
     { to: "/crm", text: "CRM", icon: UserGroupIcon },
     { to: "/finance", text: "Finance", icon: BanknotesIcon },
     { to: "/coupons-gifts", text: "Coupons", icon: TicketIcon },
@@ -191,10 +191,10 @@ const Navbar = () => {
             </div>
             
             {/* Visual separator */}
-            <div className="h-6 mx-4 border-l border-white/20"></div>
+            <div className="h-6 mx-2 border-l border-white/20"></div>
             
             {/* Secondary nav items */}
-            <div className="flex items-center space-x-2 ml-auto">
+            <div className="flex items-center space-x-2">
               {secondaryNavItems.map((item) => (
                 <NavLink
                   key={item.to}

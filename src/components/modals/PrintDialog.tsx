@@ -1,12 +1,15 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { XMarkIcon, PrinterIcon } from '@heroicons/react/24/outline';
+import LoadingSpinner from '../common/LoadingSpinner';
+import { OrderItem, Order } from '../../types';
 
 interface PrintDialogProps {
   isOpen: boolean;
   onClose: () => void;
   type: 'KOT' | 'BILL';
-  orderData: any; // Replace with your Order type
-  printRef?: React.RefObject<HTMLDivElement>;
+  orderData: Order;
+  itemsToRender?: OrderItem[];
+  onPrintComplete?: () => void;
 }
 
 const PrintDialog: React.FC<PrintDialogProps> = ({ 
@@ -14,130 +17,23 @@ const PrintDialog: React.FC<PrintDialogProps> = ({
   onClose, 
   type, 
   orderData,
-  printRef: externalPrintRef
+  itemsToRender, 
+  onPrintComplete
 }) => {
   const internalPrintRef = useRef<HTMLDivElement>(null);
-  const printRef = externalPrintRef || internalPrintRef;
-  const [isPrinting, setIsPrinting] = useState(false);
+  const printButtonRef = useRef<HTMLButtonElement>(null);
 
-  const handlePrint = () => {
-    setIsPrinting(true);
-    
-    // Create a new window for printing
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow popups for this website');
-      setIsPrinting(false);
-      return;
+  const handleNativePrint = () => {
+    window.print();
+    if (onPrintComplete) {
+      onPrintComplete();
     }
-    
-    // Get the HTML content to print
-    const contentToPrint = printRef.current;
-    if (!contentToPrint) {
-      printWindow.close();
-      setIsPrinting(false);
-      return;
-    }
-    
-    // Write to the new window
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>${type === 'KOT' ? 'Kitchen Order Ticket' : 'Bill Receipt'}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 20px;
-              max-width: 300px;
-              margin: 0 auto;
-            }
-            .print-content {
-              padding: 10px;
-            }
-            .text-center {
-              text-align: center;
-            }
-            .text-right {
-              text-align: right;
-            }
-            .font-bold {
-              font-weight: bold;
-            }
-            .mb-4 {
-              margin-bottom: 16px;
-            }
-            .mt-4 {
-              margin-top: 16px;
-            }
-            .mt-2 {
-              margin-top: 8px;
-            }
-            .py-1 {
-              padding-top: 4px;
-              padding-bottom: 4px;
-            }
-            .border-t {
-              border-top: 1px solid #e5e7eb;
-            }
-            .pt-2 {
-              padding-top: 8px;
-            }
-            .grid {
-              display: grid;
-            }
-            .grid-cols-12 {
-              grid-template-columns: repeat(12, minmax(0, 1fr));
-            }
-            .col-span-6 {
-              grid-column: span 6 / span 6;
-            }
-            .col-span-2 {
-              grid-column: span 2 / span 2;
-            }
-            .flex {
-              display: flex;
-            }
-            .justify-between {
-              justify-content: space-between;
-            }
-            @media print {
-              body {
-                padding: 0;
-                margin: 0;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          ${contentToPrint.innerHTML}
-        </body>
-      </html>
-    `);
-    
-    // Wait for content to load then print
-    printWindow.document.close();
-    printWindow.focus();
-    
-    // Print after a short delay to ensure content is loaded
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.onafterprint = () => {
-        printWindow.close();
-        setIsPrinting(false);
-      };
-    }, 500);
   };
 
   useEffect(() => {
-    // Auto-focus the print button when dialog opens
-    const timer = setTimeout(() => {
-      const printButton = document.getElementById('print-button');
-      if (printButton) {
-        printButton.focus();
-      }
-    }, 100);
-    
-    return () => clearTimeout(timer);
+    if (isOpen && printButtonRef.current) {
+      printButtonRef.current.focus();
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -168,7 +64,7 @@ const PrintDialog: React.FC<PrintDialogProps> = ({
 
           {/* Print Preview */}
           <div className="border rounded-lg p-4 mb-4 bg-gray-50 overflow-auto max-h-96">
-            <div ref={printRef} className="p-4 bg-white min-h-[300px]">
+            <div ref={internalPrintRef} id="printable-kot-content" className="p-4 bg-white min-h-[300px]"> 
               {/* KOT Template */}
               {type === 'KOT' && (
                 <div className="print-content">
@@ -188,8 +84,8 @@ const PrintDialog: React.FC<PrintDialogProps> = ({
                   </div>
                   
                   <div>
-                    {orderData?.orderItems?.map((item: any, index: number) => (
-                      <div key={index} className="flex justify-between py-1">
+                    {(type === 'KOT' && itemsToRender ? itemsToRender : orderData?.orderItems)?.map((item: OrderItem, index: number) => (
+                      <div key={item.id || index} className="flex justify-between py-1">
                         <span>{item.menuItem.name}</span>
                         <span>{item.quantity}</span>
                       </div>
@@ -267,21 +163,21 @@ const PrintDialog: React.FC<PrintDialogProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-end space-x-4">
+          <div className="flex justify-end space-x-3 mt-4">
             <button
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
             >
               Cancel
             </button>
             <button
               id="print-button"
-              onClick={handlePrint}
-              disabled={isPrinting}
-              className="px-4 py-2 bg-blue-600 border border-transparent rounded-md text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center"
+              ref={printButtonRef}
+              onClick={handleNativePrint}
+              className="px-4 py-2 bg-indigo-600 border border-transparent rounded-md text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 flex items-center"
             >
-              <PrinterIcon className="h-5 w-5 mr-2" />
-              {isPrinting ? 'Printing...' : 'Print'}
+              <PrinterIcon className="h-5 w-5 mr-1" />
+              Print {type}
             </button>
           </div>
         </div>

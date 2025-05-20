@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Container, Typography, Box, Button, Grid, Paper, TextField, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert, CircularProgress, Tabs, Tab, Chip } from '@mui/material';
+import { Container, Typography, Box, Button, Grid, Paper, TextField, IconButton, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert, Tabs, Tab, Chip } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon, ArrowBack as ArrowBackIcon, Refresh as RefreshIcon, Warning as WarningIcon, Dashboard as DashboardIcon, Inventory as InventoryIcon, Restaurant as RestaurantIcon } from '@mui/icons-material';
 import { InventoryItem, InventoryUnit } from '../types';
 import { getAllInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem } from '../firebase/services/inventoryService';
 import InventoryDashboard from '../components/InventoryDashboard';
 import MenuInventoryView from '../components/MenuInventoryView';
+import LoadingSpinner from '../components/common/LoadingSpinner';
 
 // Tab panel component
 interface TabPanelProps {
@@ -146,7 +147,7 @@ const InventoryPage: React.FC = () => {
   // Handle save (create or update)
   const handleSave = async () => {
     if (!currentItem) return;
-
+    setLoading(true); // Activate spinner
     try {
       if (isEditing && currentItem.id) {
         // Update existing item
@@ -157,23 +158,26 @@ const InventoryPage: React.FC = () => {
       }
       
       // Reload inventory items
-      await loadInventoryItems();
+      await loadInventoryItems(); 
       handleCloseDialog();
     } catch (err) {
-      console.error('Error saving inventory item:', err);
+      console.error('Error saving inventory item:', err); 
       setError('Failed to save inventory item. Please try again.');
+      setLoading(false); 
     }
   };
 
   // Handle delete
   const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this inventory item?')) {
+      setLoading(true); // Activate spinner
       try {
         await deleteInventoryItem(id);
-        await loadInventoryItems();
+        await loadInventoryItems(); 
       } catch (err) {
         console.error('Error deleting inventory item:', err);
         setError('Failed to delete inventory item. Please try again.');
+        setLoading(false); 
       }
     }
   };
@@ -261,7 +265,7 @@ const InventoryPage: React.FC = () => {
 
         {loading ? (
           <Box display="flex" justifyContent="center" p={4}>
-            <CircularProgress />
+            <LoadingSpinner text="Loading inventory..." />
           </Box>
         ) : filteredItems.length === 0 ? (
           <Alert severity="info">

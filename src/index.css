@@ -47,3 +47,99 @@ code {
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent; /* thumb track */
 } 
+
+/* Print specific styles */
+@media print {
+  /* Hide everything by default when printing */
+  body * {
+    visibility: hidden;
+    margin: 0; /* Reset margins for print */
+    padding: 0; /* Reset padding for print */
+  }
+
+  /* Make the printable area and its parents visible */
+  #printable-kot-content,
+  #printable-kot-content * {
+    visibility: visible;
+  }
+
+  /* Position the printable content at the top-left of the page */
+  #printable-kot-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%; /* Or a specific width appropriate for KOT/Bill, e.g., 80mm for thermal printers */
+    padding: 10px; /* Add some padding for the content */
+    font-size: 10pt; /* Adjust font size for print as needed */
+    line-height: 1.3;
+    background-color: white !important;
+    -webkit-print-color-adjust: exact; /* Ensure colors and backgrounds print */
+    print-color-adjust: exact;
+    box-shadow: none !important; /* Remove any screen shadows */
+    border: none !important; /* Remove any screen borders */
+  }
+
+  /* Hide buttons or other non-printable elements within the modal itself, if any were left inside #printable-kot-content */
+  #printable-kot-content .no-print,
+  #printable-kot-content .no-print * {
+    display: none !important;
+  }
+
+  /* Override modal dialog panel styles that might interfere with print layout */
+  /* This targets Headless UI's typical structure. Adjust if your modal is different. */
+  div[role="dialog"] {
+    position: static !important; /* Remove fixed/absolute positioning for print */
+    box-shadow: none !important; /* Remove shadows */
+    background: none !important; /* Remove modal background */
+    border: none !important; /* Remove modal border */
+    padding: 0 !important; /* Reset padding */
+    margin: 0 !important; /* Reset margin */
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important; /* Allow content to flow */
+  }
+
+  div[role="dialog"] > div:first-child { /* Often a backdrop or container */
+    position: static !important;
+  }
+
+  /* Specific styling for KOT/Bill within #printable-kot-content */
+  #printable-kot-content .print-content h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 12pt;
+    font-weight: bold;
+    text-align: center;
+  }
+  #printable-kot-content .print-content p {
+    margin-bottom: 4px;
+    font-size: 9pt;
+  }
+  #printable-kot-content .print-content hr {
+    margin: 6px 0;
+    border: none;
+    border-top: 1px dashed #333;
+  }
+  #printable-kot-content .print-content .flex.justify-between {
+    display: flex;
+    justify-content: space-between;
+  }
+  #printable-kot-content .print-content .text-left {
+    text-align: left;
+  }
+  #printable-kot-content .print-content .text-right {
+    text-align: right;
+  }
+  #printable-kot-content .print-content .font-bold {
+    font-weight: bold;
+  }
+  #printable-kot-content .print-content .text-xs {
+    font-size: 8pt;
+  }
+  #printable-kot-content .print-content .text-sm {
+    font-size: 9pt;
+  }
+  #printable-kot-content .print-content .text-lg {
+    font-size: 11pt;
+  }
+}
